@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Катапульта - Кто дальше?</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://sdk.play.fun/latest"></script>
+</head>
+<body>
+    <div class="game-container">
+        <header>
+            <h1>🏰 Катапульта</h1>
+        </header>
+
+        <!-- Стартовый экран -->
+        <div id="start-screen" class="screen active">
+            <div class="intro">
+                <h2>Кто дальше закинет ядро?</h2>
+                <p>У тебя есть <strong>10 секунд</strong>!</p>
+                <p>Кликай как можно быстрее, чтобы набрать силу броска.</p>
+                <p>Чем больше кликов - тем дальше полетит ядро!</p>
+                <button id="start-btn" class="btn primary">🚀 Начать игру</button>
+            </div>
+        </div>
+
+        <!-- Игровой экран -->
+        <div id="game-screen" class="screen">
+            <div class="game-info">
+                <div class="timer">
+                    <span class="label">Осталось:</span>
+                    <span id="time-display">10</span>с
+                </div>
+                <div class="clicks-counter">
+                    <span class="label">Клики:</span>
+                    <span id="clicks-display">0</span>
+                </div>
+            </div>
+
+            <div class="power-bar-container">
+                <div class="power-bar">
+                    <div id="power-fill" class="power-fill"></div>
+                </div>
+                <span class="power-label">СИЛА</span>
+            </div>
+
+            <div class="game-area">
+                <div class="catapult-area">
+                    <div id="catapult" class="catapult">
+                        <div class="arm"></div>
+                        <div class="base"></div>
+                    </div>
+                    <div id="cannonball" class="cannonball"></div>
+                </div>
+            </div>
+
+            <button id="click-btn" class="click-btn">
+                <span>НАЖИМАЙ!</span>
+            </button>
+        </div>
+
+        <!-- Экран результата -->
+        <div id="result-screen" class="screen">
+            <div class="result">
+                <h2>🎯 Результат</h2>
+                <div class="stats">
+                    <p>Кликов: <strong id="final-clicks">0</strong></p>
+                    <p>Дальность: <strong id="final-distance">0</strong>м</p>
+                </div>
+                <div class="result-visual">
+                    <div class="distance-track">
+                        <div id="distance-marker" class="distance-marker"></div>
+                    </div>
+                </div>
+                <p id="result-message" class="message"></p>
+                <button id="restart-btn" class="btn primary">🔄 Играть снова</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="game.js"></script>
+</body>
+</html>

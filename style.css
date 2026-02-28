@@ -1,0 +1,376 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: #e8e8e8;
+    overflow: hidden;
+}
+
+.game-container {
+    width: 100%;
+    max-width: 800px;
+    min-height: 600px;
+    padding: 20px;
+    text-align: center;
+}
+
+header h1 {
+    font-size: 2.5rem;
+    color: #f4a261;
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+    margin-bottom: 30px;
+    letter-spacing: 2px;
+}
+
+/* Экраны */
+.screen {
+    display: none;
+}
+
+.screen.active {
+    display: block;
+    animation: fadeIn 0.5s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Стартовый экран */
+.intro {
+    background: rgba(255,255,255,0.1);
+    padding: 40px;
+    border-radius: 20px;
+    backdrop-filter: blur(10px);
+    border: 2px solid rgba(244, 162, 97, 0.3);
+}
+
+.intro h2 {
+    font-size: 2rem;
+    color: #e9c46a;
+    margin-bottom: 20px;
+}
+
+.intro p {
+    font-size: 1.2rem;
+    margin: 15px 0;
+    line-height: 1.6;
+}
+
+.intro strong {
+    color: #f4a261;
+}
+
+/* Кнопки */
+.btn {
+    padding: 15px 40px;
+    font-size: 1.3rem;
+    border: none;
+    border-radius: 50px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin-top: 20px;
+    font-weight: bold;
+}
+
+.btn.primary {
+    background: linear-gradient(135deg, #f4a261, #e76f51);
+    color: white;
+    box-shadow: 0 4px 15px rgba(231, 111, 81, 0.4);
+}
+
+.btn.primary:hover {
+    transform: scale(1.05);
+    box-shadow: 0 6px 20px rgba(231, 111, 81, 0.6);
+}
+
+/* Игровой экран */
+.game-info {
+    display: flex;
+    justify-content: space-around;
+    margin-bottom: 20px;
+    font-size: 1.5rem;
+}
+
+.timer, .clicks-counter {
+    background: rgba(255,255,255,0.1);
+    padding: 15px 30px;
+    border-radius: 15px;
+    border: 2px solid rgba(244, 162, 97, 0.3);
+}
+
+.label {
+    color: #aaa;
+    margin-right: 10px;
+}
+
+#time-display, #clicks-display {
+    color: #f4a261;
+    font-weight: bold;
+    font-size: 1.8rem;
+}
+
+/* Прогресс-бар силы */
+.power-bar-container {
+    width: 80%;
+    margin: 0 auto 30px;
+    position: relative;
+}
+
+.power-bar {
+    height: 30px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 15px;
+    overflow: hidden;
+    border: 2px solid rgba(244, 162, 97, 0.3);
+}
+
+.power-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #2a9d8f, #e9c46a, #f4a261, #e76f51);
+    transition: width 0.1s ease;
+    border-radius: 15px;
+}
+
+.power-label {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-weight: bold;
+    color: white;
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+    letter-spacing: 2px;
+}
+
+/* Игровая область */
+.game-area {
+    height: 200px;
+    position: relative;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+}
+
+.catapult-area {
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+
+/* Катапульта */
+.catapult {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.catapult .base {
+    width: 80px;
+    height: 40px;
+    background: linear-gradient(135deg, #8b4513, #654321);
+    border-radius: 5px 5px 0 0;
+    position: relative;
+}
+
+.catapult .base::before {
+    content: '';
+    position: absolute;
+    top: -20px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 10px;
+    height: 25px;
+    background: #654321;
+}
+
+.catapult .arm {
+    position: absolute;
+    bottom: 55px;
+    left: 50%;
+    width: 8px;
+    height: 60px;
+    background: linear-gradient(135deg, #a0522d, #8b4513);
+    transform-origin: bottom center;
+    transform: translateX(-50%) rotate(-30deg);
+    border-radius: 5px;
+    transition: transform 0.05s ease;
+}
+
+.catapult.cocking .arm {
+    transform: translateX(-50%) rotate(-60deg);
+}
+
+.catapult.launch .arm {
+    animation: launchArm 0.3s ease-out;
+}
+
+@keyframes launchArm {
+    0% { transform: translateX(-50%) rotate(-60deg); }
+    50% { transform: translateX(-50%) rotate(10deg); }
+    100% { transform: translateX(-50%) rotate(-30deg); }
+}
+
+/* Ядро */
+.cannonball {
+    position: absolute;
+    width: 25px;
+    height: 25px;
+    background: radial-gradient(circle at 30% 30%, #666, #333);
+    border-radius: 50%;
+    bottom: 85px;
+    left: 50%;
+    transform: translateX(-50%);
+    opacity: 0;
+    transition: all 0.05s ease;
+}
+
+.cannonball.flying {
+    opacity: 1;
+    animation: fly 1.5s ease-out forwards;
+}
+
+@keyframes fly {
+    0% {
+        left: 50%;
+        bottom: 85px;
+    }
+    50% {
+        left: 80%;
+        bottom: 250px;
+    }
+    100% {
+        left: calc(10% + var(--distance));
+        bottom: 20px;
+    }
+}
+
+/* Кнопка клика */
+.click-btn {
+    width: 200px;
+    height: 200px;
+    border-radius: 50%;
+    border: none;
+    background: linear-gradient(135deg, #e76f51, #f4a261);
+    color: white;
+    font-size: 1.5rem;
+    font-weight: bold;
+    cursor: pointer;
+    box-shadow: 0 8px 30px rgba(231, 111, 81, 0.5);
+    transition: all 0.1s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto;
+}
+
+.click-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 10px 40px rgba(231, 111, 81, 0.7);
+}
+
+.click-btn:active {
+    transform: scale(0.95);
+    box-shadow: 0 4px 20px rgba(231, 111, 81, 0.5);
+}
+
+/* Экран результата */
+.result {
+    background: rgba(255,255,255,0.1);
+    padding: 40px;
+    border-radius: 20px;
+    backdrop-filter: blur(10px);
+    border: 2px solid rgba(244, 162, 97, 0.3);
+}
+
+.result h2 {
+    font-size: 2.5rem;
+    color: #e9c46a;
+    margin-bottom: 30px;
+}
+
+.stats {
+    font-size: 1.5rem;
+    margin-bottom: 30px;
+}
+
+.stats p {
+    margin: 15px 0;
+}
+
+.stats strong {
+    color: #f4a261;
+    font-size: 2rem;
+}
+
+/* Визуализация расстояния */
+.result-visual {
+    margin: 30px 0;
+}
+
+.distance-track {
+    width: 100%;
+    height: 40px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 20px;
+    position: relative;
+    overflow: hidden;
+    border: 2px solid rgba(244, 162, 97, 0.3);
+}
+
+.distance-marker {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 20px;
+    height: 100%;
+    background: linear-gradient(135deg, #e76f51, #f4a261);
+    border-radius: 20px;
+    transition: left 1s ease-out;
+}
+
+.message {
+    font-size: 1.3rem;
+    color: #e9c46a;
+    margin: 20px 0;
+    font-style: italic;
+}
+
+/* Адаптивность */
+@media (max-width: 600px) {
+    .game-container {
+        padding: 10px;
+    }
+
+    header h1 {
+        font-size: 1.8rem;
+    }
+
+    .intro, .result {
+        padding: 20px;
+    }
+
+    .game-info {
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .click-btn {
+        width: 150px;
+        height: 150px;
+        font-size: 1.2rem;
+    }
+}

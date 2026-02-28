@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "playdotfun": {
+      "source": "opusgamelabs/skills",
+      "sourceType": "github",
+      "computedHash": "5ef01b146c988e182fcb06f4e9a5a6133fa9a93cdce11c5ef7518f3e0c4a84a9"
+    }
+  }
+}
