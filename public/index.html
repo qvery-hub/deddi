@@ -3,35 +3,73 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Albion Online Style Game</title>
+    <title>Albion Online Style MMORPG</title>
     <link rel="stylesheet" href="style.css">
     <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
     <div id="game-container">
-        <canvas id="gameCanvas"></canvas>
+        <canvas id="gameCanvas" oncontextmenu="return false;"></canvas>
 
         <!-- UI Overlay -->
         <div id="ui-overlay">
-            <div id="player-stats">
-                <div class="stat-bar">
-                    <div id="health-bar-fill"></div>
-                    <span id="health-text">100 / 100</span>
+
+            <!-- Player Frame -->
+            <div id="player-frame" class="frame">
+                <div class="portrait"></div>
+                <div class="bars">
+                    <div class="stat-bar health">
+                        <div id="health-bar-fill" class="fill"></div>
+                        <span id="health-text" class="text">100 / 100</span>
+                    </div>
+                    <div class="stat-bar mana">
+                        <div id="mana-bar-fill" class="fill"></div>
+                        <span id="mana-text" class="text">100 / 100</span>
+                    </div>
                 </div>
             </div>
 
-            <div id="inventory">
-                <h3>Inventory</h3>
-                <p>Wood: <span id="inv-wood">0</span></p>
-                <p>Stone: <span id="inv-stone">0</span></p>
+            <!-- Target Frame -->
+            <div id="target-frame" class="frame hidden">
+                <div class="bars right-align">
+                    <div class="stat-bar health">
+                        <div id="target-health-fill" class="fill"></div>
+                        <span id="target-health-text" class="text">100 / 100</span>
+                    </div>
+                    <div class="target-name" id="target-name">Target Name</div>
+                </div>
+                <div class="portrait target-portrait"></div>
             </div>
 
-            <div id="chat-box">
+            <!-- Inventory -->
+            <div id="inventory" class="panel">
+                <h3>Inventory</h3>
+                <div class="inv-item"><div class="icon wood-icon"></div> <span id="inv-wood">0</span></div>
+                <div class="inv-item"><div class="icon stone-icon"></div> <span id="inv-stone">0</span></div>
+            </div>
+
+            <!-- Chat Box -->
+            <div id="chat-box" class="panel">
                 <div id="chat-messages"></div>
                 <div id="chat-input-container">
                     <input type="text" id="chat-input" placeholder="Press Enter to chat..." autocomplete="off">
                 </div>
             </div>
+
+            <!-- Action Bar -->
+            <div id="action-bar">
+                <div class="spell-slot">
+                    <div class="spell-icon fireball-icon"></div>
+                    <span class="hotkey">Q</span>
+                </div>
+                <div class="spell-slot disabled">
+                    <span class="hotkey">W</span>
+                </div>
+                <div class="spell-slot disabled">
+                    <span class="hotkey">E</span>
+                </div>
+            </div>
+
         </div>
     </div>
     <script src="client.js"></script>
