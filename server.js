@@ -9,8 +9,9 @@ const io = new Server(server);
 
 const PORT = process.env.PORT || 3000;
 const DB_FILE = 'database.json';
-const MAP_WIDTH = 2000;
-const MAP_HEIGHT = 2000;
+const MAP_FILE = 'map.json';
+let MAP_WIDTH = 2000;
+let MAP_HEIGHT = 2000;
 const VIEW_RADIUS = 800;
 
 app.use(express.static('public'));
@@ -287,19 +288,28 @@ function saveDatabase() {
 }
 
 function initResources() {
-    for (let i = 0; i < 50; i++) {
-        let e = new Entity()
-            .addComponent(new Position(Math.floor(Math.random() * MAP_WIDTH), Math.floor(Math.random() * MAP_HEIGHT)))
-            .addComponent(new Appearance('resource', 'tree', '#228B22'))
-            .addComponent(new ResourceData(50));
-        World.addEntity(e);
-    }
-    for (let i = 0; i < 30; i++) {
-        let e = new Entity()
-            .addComponent(new Position(Math.floor(Math.random() * MAP_WIDTH), Math.floor(Math.random() * MAP_HEIGHT)))
-            .addComponent(new Appearance('resource', 'rock', '#808080'))
-            .addComponent(new ResourceData(50));
-        World.addEntity(e);
+    try {
+        if (fs.existsSync(MAP_FILE)) {
+            const mapData = JSON.parse(fs.readFileSync(MAP_FILE, 'utf8'));
+            if (mapData.width) MAP_WIDTH = mapData.width;
+            if (mapData.height) MAP_HEIGHT = mapData.height;
+
+            if (mapData.resources && Array.isArray(mapData.resources)) {
+                mapData.resources.forEach(res => {
+                    let e = new Entity()
+                        .addComponent(new Position(res.x, res.y))
+                        .addComponent(new Appearance('resource', res.type, res.type === 'tree' ? '#228B22' : '#808080'))
+                        .addComponent(new ResourceData(res.amount));
+                    e.id = res.id; // Optional: keep ID from JSON
+                    World.addEntity(e);
+                });
+            }
+            console.log(`Map loaded: ${MAP_WIDTH}x${MAP_HEIGHT} with ${mapData.resources ? mapData.resources.length : 0} resources.`);
+        } else {
+            console.warn('map.json not found, starting empty map.');
+        }
+    } catch (err) {
+        console.error('Error loading map.json:', err);
     }
 }
 initResources();

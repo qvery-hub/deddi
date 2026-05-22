@@ -60,19 +60,15 @@ chatInput.addEventListener('keypress', (e) => {
 
 // Controls
 canvas.addEventListener('contextmenu', (e) => {
-    e.preventDefault();
-    if (document.activeElement === chatInput) chatInput.blur();
-    const worldX = e.clientX + camera.x;
-    const worldY = e.clientY + camera.y;
-    handleRightClick(worldX, worldY);
+    e.preventDefault(); // Just prevent context menu, don't map action
 });
 
 canvas.addEventListener('mousedown', (e) => {
-    if (e.button !== 0) return;
-    if (document.activeElement === chatInput) return;
+    if (e.button !== 0) return; // Only Left click
+    if (document.activeElement === chatInput) chatInput.blur();
     const worldX = e.clientX + camera.x;
     const worldY = e.clientY + camera.y;
-    handleLeftClick(worldX, worldY);
+    handleInteraction(worldX, worldY);
 });
 
 canvas.addEventListener('mousemove', (e) => {
@@ -159,18 +155,19 @@ socket.on('chatMessage', (msg) => {
 
 // --- LOGIC ---
 
-function handleLeftClick(worldX, worldY) {
+function handleInteraction(worldX, worldY) {
+    let myEntity = entities.get(myEntityId);
+    if (!myEntity || !myEntity.hp || myEntity.hp.current <= 0) return;
+
     let clickedId = null;
 
-    // Check click against entities (simple radius check)
+    // Check click against entities
     for (let [id, e] of entities) {
         if (id === myEntityId) continue;
         if (!e.pos) continue;
-
-        // Skip projectiles
         if (e.app && e.app.type === 'projectile') continue;
 
-        let radius = e.isPlayer ? 20 : 30; // approx radii
+        let radius = e.isPlayer ? 20 : 30;
         if (Math.hypot(worldX - e.pos.x, worldY - e.pos.y) < radius) {
             clickedId = id;
             break;
@@ -179,14 +176,6 @@ function handleLeftClick(worldX, worldY) {
 
     selectedTargetId = clickedId;
     updateTargetUI();
-}
-
-function handleRightClick(worldX, worldY) {
-    let myEntity = entities.get(myEntityId);
-    if (!myEntity || !myEntity.hp || myEntity.hp.current <= 0) return;
-
-    // Auto-target on right click if hitting an entity
-    handleLeftClick(worldX, worldY);
 
     if (selectedTargetId) {
         let target = entities.get(selectedTargetId);
@@ -194,7 +183,6 @@ function handleRightClick(worldX, worldY) {
             if (target.res && target.res.amount > 0) {
                 if (Math.hypot(myEntity.pos.x - target.pos.x, myEntity.pos.y - target.pos.y) < 60) {
                     socket.emit('gather', selectedTargetId);
-                    // Stop moving
                     myEntity.targetX = null;
                     socket.emit('setMoveTarget', { x: myEntity.pos.x, y: myEntity.pos.y });
                     return;
@@ -214,7 +202,7 @@ function handleRightClick(worldX, worldY) {
         }
     }
 
-    // Just Move
+    // If clicked empty space, just move
     socket.emit('setMoveTarget', { x: worldX, y: worldY });
 }
 
