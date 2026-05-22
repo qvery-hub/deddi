@@ -1,4 +1,13 @@
-const socket = io();
+// Authentication / Persistence
+let myToken = localStorage.getItem('playerToken');
+if (!myToken) {
+    myToken = 'player_' + Math.random().toString(36).substr(2, 9);
+    localStorage.setItem('playerToken', myToken);
+}
+
+const socket = io({
+    auth: { token: myToken }
+});
 
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
@@ -22,20 +31,14 @@ const chatInput = document.getElementById('chat-input');
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
-let players = {};
-let resources = {};
-let projectiles = [];
+// --- LOCAL STATE ---
+let entities = new Map();
+let myEntityId = null;
 let mapData = { width: 2000, height: 2000 };
+let myStats = { mana: 100, maxMana: 100, inventory: { wood: 0, stone: 0 } };
 
-let moveTargetX = null;
-let moveTargetY = null;
-const speed = 5;
-
-// Selection state
-let selectedTarget = null; // { type: 'player'|'resource', id: string }
+let selectedTargetId = null;
 let mouseWorldPos = { x: 0, y: 0 };
-
-// Camera
 let camera = { x: 0, y: 0 };
 
 window.addEventListener('resize', () => {
@@ -59,18 +62,14 @@ chatInput.addEventListener('keypress', (e) => {
 canvas.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     if (document.activeElement === chatInput) chatInput.blur();
-
-    // Right click: Move or Interact
     const worldX = e.clientX + camera.x;
     const worldY = e.clientY + camera.y;
     handleRightClick(worldX, worldY);
 });
 
 canvas.addEventListener('mousedown', (e) => {
-    if (e.button !== 0) return; // Only Left click
+    if (e.button !== 0) return;
     if (document.activeElement === chatInput) return;
-
-    // Left click: Select Target
     const worldX = e.clientX + camera.x;
     const worldY = e.clientY + camera.y;
     handleLeftClick(worldX, worldY);
@@ -83,253 +82,217 @@ canvas.addEventListener('mousemove', (e) => {
 
 window.addEventListener('keydown', (e) => {
     if (document.activeElement === chatInput) return;
-
-    // 'Q' key for fireball
     if (e.key.toLowerCase() === 'q') {
         socket.emit('castSpell', { x: mouseWorldPos.x, y: mouseWorldPos.y });
     }
-    // 'Escape' to clear target
     if (e.key === 'Escape') {
-        selectedTarget = null;
+        selectedTargetId = null;
         updateTargetUI();
     }
 });
 
+// --- NETWORKING (ECS Event-Driven) ---
 
-// Socket Events
-socket.on('initData', (data) => {
-    players = data.players;
-    resources = data.resources;
-    mapData = data.map;
+socket.on('initMap', (data) => {
+    mapData.width = data.width;
+    mapData.height = data.height;
+    myEntityId = data.myEntityId;
+});
+
+socket.on('entityAppeared', (state) => {
+    entities.set(state.id, state);
+    if (state.id === myEntityId) updateUI();
+});
+
+socket.on('entityDisappeared', (id) => {
+    entities.delete(id);
+    if (selectedTargetId === id) {
+        selectedTargetId = null;
+        updateTargetUI();
+    }
+});
+
+socket.on('entityMoved', (data) => {
+    let e = entities.get(data.id);
+    if (e && e.pos) {
+        if (data.targetX !== undefined) {
+            e.targetX = data.targetX;
+            e.targetY = data.targetY;
+        } else {
+            e.pos.x = data.x;
+            e.pos.y = data.y;
+            e.targetX = null;
+            e.targetY = null;
+        }
+    }
+});
+
+socket.on('entityUpdated', (data) => {
+    let e = entities.get(data.id);
+    if (e) {
+        if (data.hp) e.hp = data.hp;
+        if (data.res) e.res = data.res;
+
+        if (data.id === myEntityId) updateUI();
+        if (data.id === selectedTargetId) updateTargetUI();
+    }
+});
+
+socket.on('myStats', (data) => {
+    myStats.mana = data.mana;
+    myStats.maxMana = data.maxMana;
+    myStats.inventory = data.inventory;
     updateUI();
 });
 
-socket.on('newPlayer', (playerInfo) => { players[playerInfo.id] = playerInfo; });
-socket.on('playerMoved', (playerInfo) => {
-    if (players[playerInfo.id]) {
-        players[playerInfo.id].x = playerInfo.x;
-        players[playerInfo.id].y = playerInfo.y;
-    }
-});
-socket.on('playerDisconnected', (playerId) => {
-    delete players[playerId];
-    if (selectedTarget && selectedTarget.id === playerId) {
-        selectedTarget = null; updateTargetUI();
-    }
-});
-socket.on('resourceUpdated', (resourceInfo) => {
-    if (resources[resourceInfo.id]) resources[resourceInfo.id].amount = resourceInfo.amount;
-    updateTargetUI();
-});
-socket.on('inventoryUpdated', (inventory) => {
-    if (players[socket.id]) { players[socket.id].inventory = inventory; updateUI(); }
-});
-socket.on('playerHealthUpdated', (data) => {
-    if (players[data.id]) {
-        players[data.id].health = data.health;
-        if (data.id === socket.id) updateUI();
-        updateTargetUI();
-    }
-});
-socket.on('playerManaUpdated', (data) => {
-    if (players[data.id]) {
-        players[data.id].mana = data.mana;
-        if (data.id === socket.id) updateUI();
-    }
-});
-socket.on('playerRespawned', (playerInfo) => {
-    if (players[playerInfo.id]) {
-        players[playerInfo.id].health = playerInfo.health;
-        players[playerInfo.id].mana = playerInfo.mana;
-        players[playerInfo.id].x = playerInfo.x;
-        players[playerInfo.id].y = playerInfo.y;
-        if (playerInfo.id === socket.id) {
-            moveTargetX = null; moveTargetY = null;
-            updateUI();
-        }
-        updateTargetUI();
-    }
-});
-socket.on('gameStateUpdate', (data) => {
-    projectiles = data.projectiles;
-    // Update mana for all players
-    data.manaData.forEach(m => {
-        if(players[m.id]) players[m.id].mana = m.mana;
-    });
-    updateUI(); // Keep my mana updated
-});
 socket.on('chatMessage', (msg) => {
     const p = document.createElement('p');
     if (msg.sender === 'System') p.className = 'sys-msg';
-
-    // Prevent XSS by building DOM nodes instead of using innerHTML
     const strong = document.createElement('strong');
     strong.textContent = `${msg.sender}: `;
     p.appendChild(strong);
-
-    const textNode = document.createTextNode(msg.text);
-    p.appendChild(textNode);
-
+    p.appendChild(document.createTextNode(msg.text));
     chatMessages.appendChild(p);
     chatMessages.scrollTop = chatMessages.scrollHeight;
 });
 
 
-// Logic Functions
-function handleLeftClick(worldX, worldY) {
-    let clickedSomething = false;
+// --- LOGIC ---
 
-    // Check players first
-    for (let id in players) {
-        if (id === socket.id) continue;
-        const p = players[id];
-        if (p.health <= 0) continue;
-        if (Math.hypot(worldX - p.x, worldY - p.y) < 20) {
-            selectedTarget = { type: 'player', id: id };
-            clickedSomething = true;
+function handleLeftClick(worldX, worldY) {
+    let clickedId = null;
+
+    // Check click against entities (simple radius check)
+    for (let [id, e] of entities) {
+        if (id === myEntityId) continue;
+        if (!e.pos) continue;
+
+        // Skip projectiles
+        if (e.app && e.app.type === 'projectile') continue;
+
+        let radius = e.isPlayer ? 20 : 30; // approx radii
+        if (Math.hypot(worldX - e.pos.x, worldY - e.pos.y) < radius) {
+            clickedId = id;
             break;
         }
     }
 
-    // Check resources if no player clicked
-    if (!clickedSomething) {
-        for (let id in resources) {
-            const res = resources[id];
-            if (res.amount <= 0) continue;
-            if (Math.hypot(worldX - res.x, worldY - res.y) < 30) {
-                selectedTarget = { type: 'resource', id: id };
-                clickedSomething = true;
-                break;
-            }
-        }
-    }
-
-    if (!clickedSomething) selectedTarget = null;
+    selectedTargetId = clickedId;
     updateTargetUI();
 }
 
 function handleRightClick(worldX, worldY) {
-    const myPlayer = players[socket.id];
-    if (!myPlayer || myPlayer.health <= 0) return;
+    let myEntity = entities.get(myEntityId);
+    if (!myEntity || !myEntity.hp || myEntity.hp.current <= 0) return;
 
     // Auto-target on right click if hitting an entity
     handleLeftClick(worldX, worldY);
 
-    if (selectedTarget) {
-        if (selectedTarget.type === 'resource') {
-            const res = resources[selectedTarget.id];
-            if (res && res.amount > 0) {
-                if (Math.hypot(myPlayer.x - res.x, myPlayer.y - res.y) < 60) {
-                    socket.emit('gather', selectedTarget.id);
-                    moveTargetX = null; moveTargetY = null;
+    if (selectedTargetId) {
+        let target = entities.get(selectedTargetId);
+        if (target) {
+            if (target.res && target.res.amount > 0) {
+                if (Math.hypot(myEntity.pos.x - target.pos.x, myEntity.pos.y - target.pos.y) < 60) {
+                    socket.emit('gather', selectedTargetId);
+                    // Stop moving
+                    myEntity.targetX = null;
+                    socket.emit('setMoveTarget', { x: myEntity.pos.x, y: myEntity.pos.y });
                     return;
                 }
-                // Else move towards it
-                moveTargetX = res.x; moveTargetY = res.y;
+                socket.emit('setMoveTarget', { x: target.pos.x, y: target.pos.y });
                 return;
-            }
-        } else if (selectedTarget.type === 'player') {
-            const p = players[selectedTarget.id];
-            if (p && p.health > 0) {
-                if (Math.hypot(myPlayer.x - p.x, myPlayer.y - p.y) < 80) {
-                    socket.emit('attack', selectedTarget.id);
-                    moveTargetX = null; moveTargetY = null;
+            } else if (target.isPlayer && target.hp && target.hp.current > 0) {
+                if (Math.hypot(myEntity.pos.x - target.pos.x, myEntity.pos.y - target.pos.y) < 80) {
+                    socket.emit('attack', selectedTargetId);
+                    myEntity.targetX = null;
+                    socket.emit('setMoveTarget', { x: myEntity.pos.x, y: myEntity.pos.y });
                     return;
                 }
-                // Else move towards it
-                moveTargetX = p.x; moveTargetY = p.y;
+                socket.emit('setMoveTarget', { x: target.pos.x, y: target.pos.y });
                 return;
             }
         }
     }
 
     // Just Move
-    moveTargetX = worldX;
-    moveTargetY = worldY;
+    socket.emit('setMoveTarget', { x: worldX, y: worldY });
 }
 
 
-// UI Updaters
+// --- UI UPADTERS ---
 function updateUI() {
-    const myPlayer = players[socket.id];
-    if (!myPlayer) return;
+    let myEntity = entities.get(myEntityId);
+    if (!myEntity || !myEntity.hp) return;
 
-    healthFill.style.width = `${(myPlayer.health / myPlayer.maxHealth) * 100}%`;
-    healthText.innerText = `${Math.floor(myPlayer.health)} / ${myPlayer.maxHealth}`;
+    healthFill.style.width = `${(myEntity.hp.current / myEntity.hp.max) * 100}%`;
+    healthText.innerText = `${Math.floor(myEntity.hp.current)} / ${myEntity.hp.max}`;
 
-    manaFill.style.width = `${(myPlayer.mana / myPlayer.maxMana) * 100}%`;
-    manaText.innerText = `${Math.floor(myPlayer.mana)} / ${myPlayer.maxMana}`;
+    manaFill.style.width = `${(myStats.mana / myStats.maxMana) * 100}%`;
+    manaText.innerText = `${Math.floor(myStats.mana)} / ${myStats.maxMana}`;
 
-    invWood.innerText = myPlayer.inventory.wood;
-    invStone.innerText = myPlayer.inventory.stone;
+    invWood.innerText = myStats.inventory.wood;
+    invStone.innerText = myStats.inventory.stone;
 }
 
 function updateTargetUI() {
-    if (!selectedTarget) {
+    let target = entities.get(selectedTargetId);
+    if (!target) {
         targetFrame.classList.add('hidden');
         return;
     }
 
-    if (selectedTarget.type === 'player') {
-        const p = players[selectedTarget.id];
-        if (!p || p.health <= 0) {
-            targetFrame.classList.add('hidden');
-            selectedTarget = null;
-            return;
-        }
+    if (target.isPlayer && target.hp) {
         targetFrame.classList.remove('hidden');
-        targetNameText.innerText = `Player ${p.id.substring(0,4)}`;
-        targetHealthFill.style.width = `${(p.health / p.maxHealth) * 100}%`;
-        targetHealthText.innerText = `${Math.floor(p.health)} / ${p.maxHealth}`;
-    } else if (selectedTarget.type === 'resource') {
-        const res = resources[selectedTarget.id];
-        if (!res || res.amount <= 0) {
-            targetFrame.classList.add('hidden');
-            selectedTarget = null;
-            return;
-        }
+        targetNameText.innerText = `Player`; // Or use ID substring if passed
+        targetHealthFill.style.width = `${(target.hp.current / target.hp.max) * 100}%`;
+        targetHealthText.innerText = `${Math.floor(target.hp.current)} / ${target.hp.max}`;
+    } else if (target.res) {
         targetFrame.classList.remove('hidden');
-        targetNameText.innerText = res.type === 'tree' ? 'Tree' : 'Rock Node';
-        targetHealthFill.style.width = `${(res.amount / 50) * 100}%`; // max amount is 50
-        targetHealthText.innerText = `${res.amount} / 50`;
+        targetNameText.innerText = target.app.subtype === 'tree' ? 'Tree' : 'Rock Node';
+        targetHealthFill.style.width = `${(target.res.amount / 50) * 100}%`;
+        targetHealthText.innerText = `${target.res.amount} / 50`;
+    } else {
+        targetFrame.classList.add('hidden');
     }
 }
 
 
-// Engine
-function update() {
-    const myPlayer = players[socket.id];
-    if (!myPlayer) return;
+// --- ENGINE ---
 
-    camera.x = myPlayer.x - canvas.width / 2;
-    camera.y = myPlayer.y - canvas.height / 2;
-    camera.x = Math.max(0, Math.min(camera.x, mapData.width - canvas.width));
-    camera.y = Math.max(0, Math.min(camera.y, mapData.height - canvas.height));
+let lastTime = performance.now();
+const SPEED = 5;
 
-    if (myPlayer.health <= 0) {
-        moveTargetX = null; moveTargetY = null;
-        return;
+function update(dt) {
+    let myEntity = entities.get(myEntityId);
+    if (myEntity && myEntity.pos) {
+        camera.x = myEntity.pos.x - canvas.width / 2;
+        camera.y = myEntity.pos.y - canvas.height / 2;
+        camera.x = Math.max(0, Math.min(camera.x, mapData.width - canvas.width));
+        camera.y = Math.max(0, Math.min(camera.y, mapData.height - canvas.height));
     }
 
-    if (moveTargetX !== null && moveTargetY !== null) {
-        const dx = moveTargetX - myPlayer.x;
-        const dy = moveTargetY - myPlayer.y;
-        const distance = Math.hypot(dx, dy);
+    // Client-side interpolation/prediction
+    for (let [id, e] of entities) {
+        if (e.pos && e.targetX !== undefined && e.targetX !== null && e.targetY !== null) {
+            let dx = e.targetX - e.pos.x;
+            let dy = e.targetY - e.pos.y;
+            let dist = Math.hypot(dx, dy);
 
-        if (distance > speed) {
-            myPlayer.x += (dx / distance) * speed;
-            myPlayer.y += (dy / distance) * speed;
+            // Assuming 30 FPS server ticks, client runs at ~60.
+            // So speed per frame needs to match server speed.
+            // Server speed is 5 units per tick (30 ticks/sec).
+            // Frame rate independence is better, but simple step for now:
+            let frameSpeed = SPEED * (dt / (1000/30));
 
-            // Constrain
-            myPlayer.x = Math.max(0, Math.min(myPlayer.x, mapData.width));
-            myPlayer.y = Math.max(0, Math.min(myPlayer.y, mapData.height));
-
-            socket.emit('playerMovement', { x: myPlayer.x, y: myPlayer.y });
-        } else {
-            myPlayer.x = moveTargetX;
-            myPlayer.y = moveTargetY;
-            moveTargetX = null; moveTargetY = null;
-            socket.emit('playerMovement', { x: myPlayer.x, y: myPlayer.y });
+            if (dist > frameSpeed) {
+                e.pos.x += (dx / dist) * frameSpeed;
+                e.pos.y += (dy / dist) * frameSpeed;
+            } else {
+                e.pos.x = e.targetX;
+                e.pos.y = e.targetY;
+                e.targetX = null;
+                e.targetY = null;
+            }
         }
     }
 }
@@ -348,24 +311,20 @@ function drawSelectionRing(ctx, x, y, radius, isEnemy) {
     ctx.strokeStyle = isEnemy ? 'rgba(255, 0, 0, 0.8)' : 'rgba(255, 255, 0, 0.8)';
     ctx.lineWidth = 2;
     ctx.stroke();
-    // Inner fill
     ctx.fillStyle = isEnemy ? 'rgba(255, 0, 0, 0.2)' : 'rgba(255, 255, 0, 0.2)';
     ctx.fill();
 }
 
 function draw() {
-    // Fill map background
     ctx.fillStyle = '#1a1c23';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.save();
     ctx.translate(-camera.x, -camera.y);
 
-    // Draw Map floor
-    ctx.fillStyle = '#4a752c'; // Darker grass
+    ctx.fillStyle = '#4a752c';
     ctx.fillRect(0, 0, mapData.width, mapData.height);
 
-    // Draw Grid (optional, for perspective feel)
     ctx.strokeStyle = 'rgba(255,255,255,0.05)';
     ctx.lineWidth = 1;
     for(let i=0; i<mapData.width; i+=100) {
@@ -373,139 +332,73 @@ function draw() {
         ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(mapData.width, i); ctx.stroke();
     }
 
-    // Move Marker
-    if (moveTargetX !== null && moveTargetY !== null) {
+    // Move Marker (only for my entity)
+    let myEntity = entities.get(myEntityId);
+    if (myEntity && myEntity.targetX !== null && myEntity.targetX !== undefined) {
         ctx.beginPath();
-        ctx.ellipse(moveTargetX, moveTargetY, 15, 8, 0, 0, Math.PI * 2);
+        ctx.ellipse(myEntity.targetX, myEntity.targetY, 15, 8, 0, 0, Math.PI * 2);
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
         ctx.stroke();
     }
 
-    // Draw Selection Rings (Underneath entities)
-    if (selectedTarget) {
-        if (selectedTarget.type === 'player' && players[selectedTarget.id]) {
-            const p = players[selectedTarget.id];
-            drawSelectionRing(ctx, p.x, p.y, 15, true);
-        } else if (selectedTarget.type === 'resource' && resources[selectedTarget.id]) {
-            const res = resources[selectedTarget.id];
-            drawSelectionRing(ctx, res.x, res.y, 20, false);
+    if (selectedTargetId) {
+        let t = entities.get(selectedTargetId);
+        if (t && t.pos) {
+            drawSelectionRing(ctx, t.pos.x, t.pos.y, t.isPlayer ? 15 : 20, t.isPlayer);
         }
     }
 
-    // Collect all renderables to Y-sort them for 2.5D perspective
-    let renderables = [];
+    let renderables = Array.from(entities.values()).filter(e => e.pos).sort((a, b) => a.pos.y - b.pos.y);
 
-    // Resources
-    Object.values(resources).forEach(res => {
-        if (res.amount > 0) renderables.push({ type: 'resource', data: res, y: res.y });
-    });
+    renderables.forEach(e => {
+        if (!e.app) return;
 
-    // Players
-    Object.values(players).forEach(p => {
-        if (p.health > 0) renderables.push({ type: 'player', data: p, y: p.y });
-    });
+        let x = e.pos.x;
+        let y = e.pos.y;
 
-    // Sort by Y coordinate
-    renderables.sort((a, b) => a.y - b.y);
-
-    // Draw Entities
-    renderables.forEach(entity => {
-        if (entity.type === 'resource') {
-            const res = entity.data;
-            drawShadow(ctx, res.x, res.y, 20);
-
-            if (res.type === 'tree') {
-                // Trunk
+        if (e.app.type === 'resource') {
+            if (e.res && e.res.amount <= 0) return;
+            drawShadow(ctx, x, y, 20);
+            if (e.app.subtype === 'tree') {
                 ctx.fillStyle = '#5c4033';
-                ctx.fillRect(res.x - 4, res.y - 20, 8, 20);
-                // Canopy
-                ctx.beginPath();
-                ctx.arc(res.x, res.y - 25, 25, 0, Math.PI * 2);
-                ctx.fillStyle = '#228B22';
-                ctx.fill();
-                ctx.strokeStyle = '#1a5e1a';
-                ctx.lineWidth = 2;
-                ctx.stroke();
+                ctx.fillRect(x - 4, y - 20, 8, 20);
+                ctx.beginPath(); ctx.arc(x, y - 25, 25, 0, Math.PI * 2);
+                ctx.fillStyle = '#228B22'; ctx.fill();
+                ctx.strokeStyle = '#1a5e1a'; ctx.lineWidth = 2; ctx.stroke();
             } else {
-                // Rock (Hexagon-ish)
-                ctx.beginPath();
-                ctx.moveTo(res.x - 15, res.y - 10);
-                ctx.lineTo(res.x, res.y - 20);
-                ctx.lineTo(res.x + 20, res.y - 5);
-                ctx.lineTo(res.x + 10, res.y + 10);
-                ctx.lineTo(res.x - 10, res.y + 15);
-                ctx.fillStyle = '#666';
-                ctx.fill();
-                // Rock highlight
-                ctx.beginPath();
-                ctx.moveTo(res.x - 15, res.y - 10);
-                ctx.lineTo(res.x, res.y - 20);
-                ctx.lineTo(res.x + 5, res.y - 5);
-                ctx.fillStyle = '#888';
-                ctx.fill();
+                ctx.beginPath(); ctx.moveTo(x - 15, y - 10); ctx.lineTo(x, y - 20); ctx.lineTo(x + 20, y - 5); ctx.lineTo(x + 10, y + 10); ctx.lineTo(x - 10, y + 15);
+                ctx.fillStyle = '#666'; ctx.fill();
+                ctx.beginPath(); ctx.moveTo(x - 15, y - 10); ctx.lineTo(x, y - 20); ctx.lineTo(x + 5, y - 5);
+                ctx.fillStyle = '#888'; ctx.fill();
             }
+        } else if (e.isPlayer) {
+            if (e.hp && e.hp.current <= 0) return;
+            drawShadow(ctx, x, y, 15);
+            ctx.beginPath(); ctx.arc(x, y - 15, 15, 0, Math.PI * 2);
+            ctx.fillStyle = e.app.color; ctx.fill();
+            ctx.strokeStyle = '#222'; ctx.lineWidth = 2; ctx.stroke();
 
-        } else if (entity.type === 'player') {
-            const p = entity.data;
-            drawShadow(ctx, p.x, p.y, 15);
-
-            // Body
-            ctx.beginPath();
-            ctx.arc(p.x, p.y - 15, 15, 0, Math.PI * 2);
-            ctx.fillStyle = p.color;
-            ctx.fill();
-            ctx.strokeStyle = '#222';
-            ctx.lineWidth = 2;
-            ctx.stroke();
-
-            // Name tag
-            ctx.fillStyle = 'white';
-            ctx.font = '12px Segoe UI';
-            ctx.textAlign = 'center';
-            // Dark outline for text
-            ctx.strokeStyle = 'black';
-            ctx.lineWidth = 2;
-            ctx.strokeText(p.id.substring(0, 4), p.x, p.y - 35);
-            ctx.fillText(p.id.substring(0, 4), p.x, p.y - 35);
-
-            // Floating HP bar (only for other players, local player looks at UI)
-            if (p.id !== socket.id) {
+            if (e.id !== myEntityId) {
                 const bw = 30, bh = 4;
-                ctx.fillStyle = '#111';
-                ctx.fillRect(p.x - bw/2, p.y - 45, bw, bh);
-                ctx.fillStyle = '#d32f2f';
-                ctx.fillRect(p.x - bw/2, p.y - 45, bw * (p.health/p.maxHealth), bh);
+                ctx.fillStyle = '#111'; ctx.fillRect(x - bw/2, y - 45, bw, bh);
+                ctx.fillStyle = '#d32f2f'; ctx.fillRect(x - bw/2, y - 45, bw * (e.hp.current/e.hp.max), bh);
             }
+        } else if (e.app.type === 'projectile') {
+            drawShadow(ctx, x, y, 8);
+            ctx.beginPath(); ctx.arc(x, y - 10, 8, 0, Math.PI * 2);
+            const grd = ctx.createRadialGradient(x, y-10, 0, x, y-10, 8);
+            grd.addColorStop(0, "yellow"); grd.addColorStop(1, "red");
+            ctx.fillStyle = grd; ctx.fill();
         }
-    });
-
-    // Draw Projectiles
-    projectiles.forEach(proj => {
-        drawShadow(ctx, proj.x, proj.y, 8);
-
-        ctx.beginPath();
-        ctx.arc(proj.x, proj.y - 10, 8, 0, Math.PI * 2);
-        // Fireball gradient
-        const grd = ctx.createRadialGradient(proj.x, proj.y-10, 0, proj.x, proj.y-10, 8);
-        grd.addColorStop(0, "yellow");
-        grd.addColorStop(1, "red");
-        ctx.fillStyle = grd;
-        ctx.fill();
-
-        // Trail
-        ctx.beginPath();
-        ctx.moveTo(proj.x, proj.y - 10);
-        ctx.lineTo(proj.x - proj.vx*2, proj.y - 10 - proj.vy*2);
-        ctx.strokeStyle = 'rgba(255, 100, 0, 0.5)';
-        ctx.lineWidth = 6;
-        ctx.stroke();
     });
 
     ctx.restore();
 }
 
-function gameLoop() {
-    update();
+function gameLoop(time) {
+    let dt = time - lastTime;
+    lastTime = time;
+    update(dt);
     draw();
     requestAnimationFrame(gameLoop);
 }

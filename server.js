@@ -9,228 +9,425 @@ const io = new Server(server);
 
 const PORT = process.env.PORT || 3000;
 const DB_FILE = 'database.json';
+const MAP_WIDTH = 2000;
+const MAP_HEIGHT = 2000;
+const VIEW_RADIUS = 800;
 
 app.use(express.static('public'));
 
-let players = {};
-let projectiles = [];
+// --- ECS CORE ---
+let nextEntityId = 1;
+class Entity {
+    constructor() {
+        this.id = 'e_' + nextEntityId++;
+        this.components = {};
+    }
+    addComponent(component) {
+        this.components[component.name] = component;
+        return this;
+    }
+    getComponent(name) { return this.components[name]; }
+    hasComponent(name) { return !!this.components[name]; }
+}
 
-// Game Map & Resources
-const MAP_WIDTH = 2000;
-const MAP_HEIGHT = 2000;
-let resources = {};
+class Component { constructor(name) { this.name = name; } }
+
+// --- COMPONENTS ---
+class Position extends Component { constructor(x, y) { super('Position'); this.x = x; this.y = y; } }
+class Velocity extends Component { constructor(speed) { super('Velocity'); this.speed = speed; this.targetX = null; this.targetY = null; } }
+class Appearance extends Component { constructor(type, subtype, color) { super('Appearance'); this.type = type; this.subtype = subtype; this.color = color; } }
+class Health extends Component { constructor(max) { super('Health'); this.max = max; this.current = max; } }
+class Mana extends Component { constructor(max) { super('Mana'); this.max = max; this.current = max; this.lastSent = max; } }
+class PlayerData extends Component { constructor(socketId, accountId) { super('PlayerData'); this.socketId = socketId; this.accountId = accountId; this.inventory = { wood: 0, stone: 0 }; this.lastInvStr = ""; } }
+class ResourceData extends Component { constructor(amount) { super('ResourceData'); this.amount = amount; } }
+class ProjectileData extends Component { constructor(ownerId, vx, vy, life) { super('ProjectileData'); this.ownerId = ownerId; this.vx = vx; this.vy = vy; this.life = life; } }
+
+// --- WORLD ---
+const World = {
+    entities: new Map(),
+    playersBySocket: new Map(),
+
+    addEntity(entity) {
+        this.entities.set(entity.id, entity);
+        if (entity.hasComponent('PlayerData')) {
+            this.playersBySocket.set(entity.getComponent('PlayerData').socketId, entity);
+        }
+    },
+    removeEntity(entityId) {
+        const e = this.entities.get(entityId);
+        if (e && e.hasComponent('PlayerData')) {
+            this.playersBySocket.delete(e.getComponent('PlayerData').socketId);
+        }
+        this.entities.delete(entityId);
+        io.emit('entityDisappeared', entityId);
+    },
+    getEntity(id) { return this.entities.get(id); },
+    getPlayerBySocket(socketId) { return this.playersBySocket.get(socketId); }
+};
+
+// --- SYSTEMS ---
+
+function MovementSystem(dt) {
+    for (let [id, entity] of World.entities) {
+        if (entity.hasComponent('Position') && entity.hasComponent('Velocity')) {
+            let pos = entity.getComponent('Position');
+            let vel = entity.getComponent('Velocity');
+
+            if (vel.targetX !== null && vel.targetY !== null) {
+                let dx = vel.targetX - pos.x;
+                let dy = vel.targetY - pos.y;
+                let dist = Math.hypot(dx, dy);
+
+                if (dist > vel.speed) {
+                    pos.x += (dx / dist) * vel.speed;
+                    pos.y += (dy / dist) * vel.speed;
+                } else {
+                    pos.x = vel.targetX;
+                    pos.y = vel.targetY;
+                    vel.targetX = null;
+                    vel.targetY = null;
+                }
+
+                pos.x = Math.max(0, Math.min(pos.x, MAP_WIDTH));
+                pos.y = Math.max(0, Math.min(pos.y, MAP_HEIGHT));
+            }
+        }
+
+        if (entity.hasComponent('Position') && entity.hasComponent('ProjectileData')) {
+            let pos = entity.getComponent('Position');
+            let proj = entity.getComponent('ProjectileData');
+            pos.x += proj.vx;
+            pos.y += proj.vy;
+            proj.life--;
+        }
+    }
+}
+
+const playerVision = new Map();
+
+function serializeEntityState(entity) {
+    let state = { id: entity.id };
+    if (entity.hasComponent('Position')) state.pos = { x: entity.getComponent('Position').x, y: entity.getComponent('Position').y };
+    if (entity.hasComponent('Appearance')) state.app = { type: entity.getComponent('Appearance').type, subtype: entity.getComponent('Appearance').subtype, color: entity.getComponent('Appearance').color };
+    if (entity.hasComponent('Health')) state.hp = { current: entity.getComponent('Health').current, max: entity.getComponent('Health').max };
+    if (entity.hasComponent('PlayerData')) state.isPlayer = true;
+    if (entity.hasComponent('ResourceData')) state.res = { amount: entity.getComponent('ResourceData').amount };
+
+    if (entity.hasComponent('Velocity')) {
+        let vel = entity.getComponent('Velocity');
+        if (vel.targetX !== null) {
+            state.targetX = vel.targetX;
+            state.targetY = vel.targetY;
+        }
+    }
+
+    if (entity.hasComponent('ProjectileData')) {
+         state.app = { type: 'projectile', subtype: 'fireball', color: '#ff0000' };
+         // For projectiles, we need to send their trajectory so clients can interpolate
+         let proj = entity.getComponent('ProjectileData');
+         state.targetX = state.pos.x + proj.vx * proj.life;
+         state.targetY = state.pos.y + proj.vy * proj.life;
+    }
+
+    return state;
+}
+
+function NetworkSystem() {
+    for (let [socketId, playerEntity] of World.playersBySocket) {
+        let socket = io.sockets.sockets.get(socketId);
+        if (!socket) continue;
+
+        let pPos = playerEntity.getComponent('Position');
+        if (!pPos) continue;
+
+        if (!playerVision.has(socketId)) playerVision.set(socketId, new Set());
+        let currentlyVisible = playerVision.get(socketId);
+        let newVisible = new Set();
+
+        for (let [eId, entity] of World.entities) {
+            let ePos = entity.getComponent('Position');
+            if (!ePos) continue;
+
+            let dist = Math.hypot(pPos.x - ePos.x, pPos.y - ePos.y);
+            if (dist < VIEW_RADIUS) {
+                newVisible.add(eId);
+
+                if (!currentlyVisible.has(eId)) {
+                    // Entity entered view
+                    socket.emit('entityAppeared', serializeEntityState(entity));
+                }
+            }
+        }
+
+        for (let eId of currentlyVisible) {
+            if (!newVisible.has(eId)) {
+                socket.emit('entityDisappeared', eId);
+            }
+        }
+
+        playerVision.set(socketId, newVisible);
+
+        // Only emit myStats if they changed
+        if (playerEntity.hasComponent('Mana')) {
+            let mana = playerEntity.getComponent('Mana');
+            let inv = playerEntity.getComponent('PlayerData').inventory;
+            let invStr = JSON.stringify(inv);
+
+            if (mana.current !== mana.lastSent || playerEntity.getComponent('PlayerData').lastInvStr !== invStr) {
+                socket.emit('myStats', {
+                    mana: mana.current,
+                    maxMana: mana.max,
+                    inventory: inv
+                });
+                mana.lastSent = mana.current;
+                playerEntity.getComponent('PlayerData').lastInvStr = invStr;
+            }
+        }
+    }
+}
+
+function GameLogicSystem() {
+    let toRemove = [];
+    for (let [id, entity] of World.entities) {
+        if (entity.hasComponent('ProjectileData')) {
+            let proj = entity.getComponent('ProjectileData');
+            let pPos = entity.getComponent('Position');
+
+            if (proj.life <= 0) {
+                toRemove.push(id);
+                continue;
+            }
+
+            for (let [pid, target] of World.entities) {
+                if (pid === proj.ownerId || !target.hasComponent('Health') || !target.hasComponent('Player')) continue;
+                if (target.getComponent('Health').current <= 0) continue;
+
+                let tPos = target.getComponent('Position');
+                if (!tPos) continue;
+
+                if (Math.hypot(pPos.x - tPos.x, pPos.y - tPos.y) < 20) {
+                    target.getComponent('Health').current -= 25;
+                    toRemove.push(id);
+                    broadcastToVisible(target, 'entityUpdated', { id: target.id, hp: { current: target.getComponent('Health').current, max: target.getComponent('Health').max }});
+                    checkDeath(target, proj.ownerId);
+                    break;
+                }
+            }
+        }
+    }
+
+    toRemove.forEach(id => {
+        World.removeEntity(id);
+    });
+
+    for (let [id, entity] of World.entities) {
+        if (entity.hasComponent('Mana') && entity.hasComponent('Health') && entity.getComponent('Health').current > 0) {
+            let mana = entity.getComponent('Mana');
+            if (mana.current < mana.max) mana.current = Math.min(mana.max, mana.current + 1);
+        }
+    }
+}
+
+function broadcastToVisible(targetEntity, event, data) {
+    let tPos = targetEntity.getComponent('Position');
+    if (!tPos) return;
+
+    for (let [socketId, playerEntity] of World.playersBySocket) {
+        let pPos = playerEntity.getComponent('Position');
+        if (pPos && Math.hypot(pPos.x - tPos.x, pPos.y - tPos.y) < VIEW_RADIUS) {
+            io.to(socketId).emit(event, data);
+        }
+    }
+}
+
+function checkDeath(entity, killerId) {
+    let hp = entity.getComponent('Health');
+    if (hp.current <= 0) {
+        hp.current = 0;
+        let pData = entity.getComponent('PlayerData');
+        if (pData) {
+            io.emit('chatMessage', { sender: 'System', text: `Player died.` });
+            setTimeout(() => {
+                hp.current = hp.max;
+                let mana = entity.getComponent('Mana');
+                if (mana) mana.current = mana.max;
+                let pos = entity.getComponent('Position');
+                pos.x = Math.floor(Math.random() * 800);
+                pos.y = Math.floor(Math.random() * 600);
+
+                let vel = entity.getComponent('Velocity');
+                if (vel) { vel.targetX = null; vel.targetY = null; }
+
+                broadcastToVisible(entity, 'entityUpdated', serializeEntityState(entity));
+                broadcastToVisible(entity, 'entityMoved', { id: entity.id, targetX: pos.x, targetY: pos.y, snap: true });
+            }, 3000);
+        }
+    }
+}
+
+// --- INITIALIZATION & DATABASE ---
+
+let savedPlayers = {};
+try {
+    if (fs.existsSync(DB_FILE)) savedPlayers = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+} catch (err) {}
+
+function saveDatabase() {
+    // DO NOT OVERWRITE entire file. Merge connected players into savedPlayers
+    for (let [socketId, entity] of World.playersBySocket) {
+        let pData = entity.getComponent('PlayerData');
+        savedPlayers[pData.accountId] = {
+            x: entity.getComponent('Position').x,
+            y: entity.getComponent('Position').y,
+            inventory: pData.inventory,
+            color: entity.getComponent('Appearance').color
+        };
+    }
+    fs.writeFile(DB_FILE, JSON.stringify(savedPlayers), () => {});
+}
 
 function initResources() {
     for (let i = 0; i < 50; i++) {
-        const id = 'tree_' + i;
-        resources[id] = { id: id, type: 'tree', x: Math.floor(Math.random() * MAP_WIDTH), y: Math.floor(Math.random() * MAP_HEIGHT), amount: 50 };
+        let e = new Entity()
+            .addComponent(new Position(Math.floor(Math.random() * MAP_WIDTH), Math.floor(Math.random() * MAP_HEIGHT)))
+            .addComponent(new Appearance('resource', 'tree', '#228B22'))
+            .addComponent(new ResourceData(50));
+        World.addEntity(e);
     }
     for (let i = 0; i < 30; i++) {
-        const id = 'rock_' + i;
-        resources[id] = { id: id, type: 'rock', x: Math.floor(Math.random() * MAP_WIDTH), y: Math.floor(Math.random() * MAP_HEIGHT), amount: 50 };
+        let e = new Entity()
+            .addComponent(new Position(Math.floor(Math.random() * MAP_WIDTH), Math.floor(Math.random() * MAP_HEIGHT)))
+            .addComponent(new Appearance('resource', 'rock', '#808080'))
+            .addComponent(new ResourceData(50));
+        World.addEntity(e);
     }
 }
 initResources();
 
-// Load database
-try {
-    if (fs.existsSync(DB_FILE)) {
-        const data = fs.readFileSync(DB_FILE, 'utf8');
-        players = JSON.parse(data);
-        console.log('Database loaded');
-    }
-} catch (err) {
-    console.error('Error loading database:', err);
-}
+// --- SOCKET HANDLERS ---
 
-function saveDatabase() {
-    fs.writeFile(DB_FILE, JSON.stringify(players), (err) => {
-        if (err) console.error('Error saving database:', err);
-    });
-}
+// Require authentication token for persistence
+io.use((socket, next) => {
+    const token = socket.handshake.auth.token;
+    if (!token) {
+        return next(new Error("Authentication error: No token provided"));
+    }
+    socket.accountId = token;
+    next();
+});
 
 io.on('connection', (socket) => {
-    console.log(`User connected: ${socket.id}`);
+    console.log(`Connected: ${socket.id} (Account: ${socket.accountId})`);
 
-    if (!players[socket.id]) {
-        players[socket.id] = {
-            id: socket.id,
-            x: Math.floor(Math.random() * 800),
-            y: Math.floor(Math.random() * 600),
-            color: `hsl(${Math.random() * 360}, 100%, 50%)`,
-            health: 100,
-            maxHealth: 100,
-            mana: 100,
-            maxMana: 100,
-            inventory: { wood: 0, stone: 0 }
-        };
-        saveDatabase();
-    } else {
-        // Ensure returning players have mana stats
-        if (players[socket.id].mana === undefined) players[socket.id].mana = 100;
-        if (players[socket.id].maxMana === undefined) players[socket.id].maxMana = 100;
-    }
+    let pData = savedPlayers[socket.accountId] || { x: 500, y: 500, inventory: { wood: 0, stone: 0 }, color: `hsl(${Math.random()*360},100%,50%)` };
 
-    socket.emit('initData', {
-        players: players,
-        resources: resources,
-        map: { width: MAP_WIDTH, height: MAP_HEIGHT }
-    });
+    let player = new Entity()
+        .addComponent(new Position(pData.x, pData.y))
+        .addComponent(new Velocity(5))
+        .addComponent(new Appearance('player', 'human', pData.color))
+        .addComponent(new Health(100))
+        .addComponent(new Mana(100))
+        .addComponent(new PlayerData(socket.id, socket.accountId))
+        .addComponent(new Component('Player'));
 
-    socket.broadcast.emit('newPlayer', players[socket.id]);
+    player.getComponent('PlayerData').inventory = pData.inventory;
 
-    socket.on('playerMovement', (movementData) => {
-        if (!movementData || typeof movementData.x !== 'number' || typeof movementData.y !== 'number') return;
+    World.addEntity(player);
+    socket.emit('initMap', { width: MAP_WIDTH, height: MAP_HEIGHT, myEntityId: player.id });
 
-        if (players[socket.id] && players[socket.id].health > 0) {
-            players[socket.id].x = movementData.x;
-            players[socket.id].y = movementData.y;
-            socket.broadcast.emit('playerMoved', players[socket.id]);
+    socket.on('setMoveTarget', (pos) => {
+        if (!pos || typeof pos.x !== 'number' || typeof pos.y !== 'number') return;
+        let e = World.getPlayerBySocket(socket.id);
+        if (e && e.getComponent('Health').current > 0) {
+            let vel = e.getComponent('Velocity');
+            vel.targetX = pos.x;
+            vel.targetY = pos.y;
+            // Emit EVENT of movement intention ONLY ONCE
+            broadcastToVisible(e, 'entityMoved', { id: e.id, targetX: pos.x, targetY: pos.y });
         }
     });
 
-    socket.on('gather', (resourceId) => {
-        const player = players[socket.id];
-        const resource = resources[resourceId];
-
-        if (player && resource && player.health > 0) {
-            const dx = player.x - resource.x;
-            const dy = player.y - resource.y;
-            if (Math.sqrt(dx * dx + dy * dy) < 60 && resource.amount > 0) {
-                resource.amount -= 10;
-                if (resource.type === 'tree') player.inventory.wood += 10;
-                else if (resource.type === 'rock') player.inventory.stone += 10;
-
-                io.emit('resourceUpdated', resource);
-                socket.emit('inventoryUpdated', player.inventory);
+    socket.on('gather', (targetId) => {
+        let e = World.getPlayerBySocket(socket.id);
+        let target = World.getEntity(targetId);
+        if (e && target && target.hasComponent('ResourceData') && e.getComponent('Health').current > 0) {
+            let ePos = e.getComponent('Position');
+            let tPos = target.getComponent('Position');
+            if (Math.hypot(ePos.x - tPos.x, ePos.y - tPos.y) < 60) {
+                let res = target.getComponent('ResourceData');
+                if (res.amount > 0) {
+                    res.amount -= 10;
+                    let app = target.getComponent('Appearance');
+                    if (app.subtype === 'tree') e.getComponent('PlayerData').inventory.wood += 10;
+                    if (app.subtype === 'rock') e.getComponent('PlayerData').inventory.stone += 10;
+                    broadcastToVisible(target, 'entityUpdated', { id: targetId, res: { amount: res.amount } });
+                }
             }
         }
     });
 
     socket.on('attack', (targetId) => {
-        const player = players[socket.id];
-        const target = players[targetId];
-
-        if (player && target && player.health > 0 && target.health > 0) {
-            const dx = player.x - target.x;
-            const dy = player.y - target.y;
-            if (Math.sqrt(dx * dx + dy * dy) < 80) { // Melee range
-                target.health -= 10;
-                checkDeath(targetId, socket.id);
-                io.emit('playerHealthUpdated', { id: targetId, health: target.health });
+        let e = World.getPlayerBySocket(socket.id);
+        let target = World.getEntity(targetId);
+        if (e && target && target.hasComponent('Health') && e.getComponent('Health').current > 0) {
+            let ePos = e.getComponent('Position');
+            let tPos = target.getComponent('Position');
+            if (Math.hypot(ePos.x - tPos.x, ePos.y - tPos.y) < 80) {
+                target.getComponent('Health').current -= 10;
+                broadcastToVisible(target, 'entityUpdated', { id: targetId, hp: { current: target.getComponent('Health').current, max: target.getComponent('Health').max }});
+                checkDeath(target, e.id);
             }
         }
     });
 
-    socket.on('castSpell', (targetPos) => {
-        if (!targetPos || typeof targetPos.x !== 'number' || typeof targetPos.y !== 'number') return;
+    socket.on('castSpell', (pos) => {
+        if (!pos || typeof pos.x !== 'number' || typeof pos.y !== 'number') return;
+        let e = World.getPlayerBySocket(socket.id);
+        if (e && e.getComponent('Health').current > 0) {
+            let mana = e.getComponent('Mana');
+            if (mana.current >= 20) {
+                mana.current -= 20;
+                let ePos = e.getComponent('Position');
+                let dx = pos.x - ePos.x;
+                let dy = pos.y - ePos.y;
+                let dist = Math.hypot(dx, dy);
 
-        const player = players[socket.id];
-        if (player && player.health > 0 && player.mana >= 20) {
-            player.mana -= 20;
-            socket.emit('playerManaUpdated', { id: player.id, mana: player.mana });
+                let proj = new Entity()
+                    .addComponent(new Position(ePos.x, ePos.y))
+                    .addComponent(new ProjectileData(e.id, (dx/dist)*15, (dy/dist)*15, 30))
+                    .addComponent(new Appearance('projectile', 'fireball', '#ff0000'));
+                World.addEntity(proj);
 
-            const dx = targetPos.x - player.x;
-            const dy = targetPos.y - player.y;
-            const dist = Math.sqrt(dx*dx + dy*dy);
-
-            projectiles.push({
-                id: Math.random().toString(36).substr(2, 9),
-                ownerId: player.id,
-                x: player.x,
-                y: player.y,
-                vx: (dx / dist) * 15,
-                vy: (dy / dist) * 15,
-                life: 30 // frames
-            });
+                // Emitting the projectile creation to viewers
+                broadcastToVisible(proj, 'entityAppeared', serializeEntityState(proj));
+            }
         }
     });
 
     socket.on('chatMessage', (msg) => {
         if (typeof msg !== 'string') return;
-        // Basic length check to prevent giant payloads
-        if (msg.length > 200) msg = msg.substring(0, 200);
-        io.emit('chatMessage', { sender: socket.id.substring(0,4), text: msg });
+        msg = msg.substring(0, 200);
+        io.emit('chatMessage', { sender: socket.accountId.substring(0,4), text: msg });
     });
 
     socket.on('disconnect', () => {
-        console.log(`User disconnected: ${socket.id}`);
-        delete players[socket.id];
-        io.emit('playerDisconnected', socket.id);
+        console.log(`Disconnected: ${socket.id} (Account: ${socket.accountId})`);
+        let e = World.getPlayerBySocket(socket.id);
+        if (e) {
+            saveDatabase(); // Save before deleting
+            World.removeEntity(e.id);
+            playerVision.delete(socket.id);
+        }
     });
 });
 
-function checkDeath(targetId, killerId) {
-    const target = players[targetId];
-    if (target.health <= 0) {
-        target.health = 0;
-        io.emit('chatMessage', { sender: 'System', text: `${killerId.substring(0,4)} killed ${targetId.substring(0,4)}!` });
-
-        setTimeout(() => {
-            if(players[targetId]) {
-                players[targetId].health = players[targetId].maxHealth;
-                players[targetId].mana = players[targetId].maxMana;
-                players[targetId].x = Math.floor(Math.random() * 800);
-                players[targetId].y = Math.floor(Math.random() * 600);
-                io.emit('playerRespawned', players[targetId]);
-            }
-        }, 3000);
-    }
-}
-
-// Server Game Loop (30 FPS)
+// GAME LOOP
 setInterval(() => {
-    // Regen Mana
-    for (let id in players) {
-        const p = players[id];
-        if (p.health > 0 && p.mana < p.maxMana) {
-            p.mana += 1; // 1 mana per tick
-            if (p.mana > p.maxMana) p.mana = p.maxMana;
-            // Note: to save bandwidth, we could only emit this occasionally, but for proto it's ok
-        }
-    }
-
-    // Process Projectiles
-    for (let i = projectiles.length - 1; i >= 0; i--) {
-        let proj = projectiles[i];
-        proj.x += proj.vx;
-        proj.y += proj.vy;
-        proj.life--;
-
-        let hit = false;
-        // Collision with players
-        for (let pid in players) {
-            if (pid === proj.ownerId) continue;
-            let p = players[pid];
-            if (p.health > 0) {
-                let dx = p.x - proj.x;
-                let dy = p.y - proj.y;
-                if (Math.sqrt(dx*dx + dy*dy) < 20) {
-                    p.health -= 25; // Spell damage
-                    hit = true;
-                    checkDeath(pid, proj.ownerId);
-                    io.emit('playerHealthUpdated', { id: pid, health: p.health });
-                    break;
-                }
-            }
-        }
-
-        if (hit || proj.life <= 0) {
-            projectiles.splice(i, 1);
-        }
-    }
-
-    // Broadcast volatile state (mana, projectiles)
-    io.emit('gameStateUpdate', {
-        projectiles: projectiles,
-        // Send mana updates for all
-        manaData: Object.keys(players).map(id => ({id: id, mana: players[id].mana}))
-    });
-
+    MovementSystem();
+    GameLogicSystem();
+    NetworkSystem();
 }, 1000 / 30);
 
 setInterval(saveDatabase, 5000);
 
-server.listen(PORT, () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
-});
+server.listen(PORT, () => { console.log('Server on port', PORT); });
