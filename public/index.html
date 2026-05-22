@@ -10,6 +10,29 @@
 <body>
     <div id="game-container">
         <canvas id="gameCanvas"></canvas>
+
+        <!-- UI Overlay -->
+        <div id="ui-overlay">
+            <div id="player-stats">
+                <div class="stat-bar">
+                    <div id="health-bar-fill"></div>
+                    <span id="health-text">100 / 100</span>
+                </div>
+            </div>
+
+            <div id="inventory">
+                <h3>Inventory</h3>
+                <p>Wood: <span id="inv-wood">0</span></p>
+                <p>Stone: <span id="inv-stone">0</span></p>
+            </div>
+
+            <div id="chat-box">
+                <div id="chat-messages"></div>
+                <div id="chat-input-container">
+                    <input type="text" id="chat-input" placeholder="Press Enter to chat..." autocomplete="off">
+                </div>
+            </div>
+        </div>
     </div>
     <script src="client.js"></script>
 </body>
