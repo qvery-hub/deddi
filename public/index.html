@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Albion Online Style MMORPG</title>
     <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Lato:wght@400;700&display=swap" rel="stylesheet">
     <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
@@ -14,10 +15,16 @@
         <!-- UI Overlay -->
         <div id="ui-overlay">
 
-            <!-- Player Frame -->
-            <div id="player-frame" class="frame">
-                <div class="portrait"></div>
-                <div class="bars">
+            <!-- Top Left: Player Frame -->
+            <div id="player-frame-container">
+                <div id="player-portrait">
+                    <div class="portrait-image"></div>
+                    <div class="level-badge">1</div>
+                </div>
+                <div id="player-stats-bars">
+                    <div class="name-container">
+                        <span id="player-name">Player</span>
+                    </div>
                     <div class="stat-bar health">
                         <div id="health-bar-fill" class="fill"></div>
                         <span id="health-text" class="text">100 / 100</span>
@@ -29,45 +36,85 @@
                 </div>
             </div>
 
-            <!-- Target Frame -->
-            <div id="target-frame" class="frame hidden">
-                <div class="bars right-align">
+            <!-- Top Center: Target Frame -->
+            <div id="target-frame" class="hidden">
+                <div id="target-stats-bars">
+                    <div class="name-container right">
+                        <span id="target-name" class="target-name">Target</span>
+                    </div>
                     <div class="stat-bar health">
                         <div id="target-health-fill" class="fill"></div>
                         <span id="target-health-text" class="text">100 / 100</span>
                     </div>
-                    <div class="target-name" id="target-name">Target Name</div>
                 </div>
-                <div class="portrait target-portrait"></div>
+                <div id="target-portrait">
+                    <div class="portrait-image target-img"></div>
+                </div>
             </div>
 
-            <!-- Inventory -->
-            <div id="inventory" class="panel">
-                <h3>Inventory</h3>
-                <div class="inv-item"><div class="icon wood-icon"></div> <span id="inv-wood">0</span></div>
-                <div class="inv-item"><div class="icon stone-icon"></div> <span id="inv-stone">0</span></div>
+            <!-- Top Right: Inventory/Destiny Board Toggle (simplified as inventory panel for now) -->
+            <div id="inventory-panel" class="parchment-panel">
+                <div class="panel-header">
+                    <h3>Inventory</h3>
+                    <div class="close-btn">x</div>
+                </div>
+                <div class="panel-content">
+                    <div class="inv-slot"><div class="icon wood-icon"></div> <span class="amount" id="inv-wood">0</span></div>
+                    <div class="inv-slot"><div class="icon stone-icon"></div> <span class="amount" id="inv-stone">0</span></div>
+                    <!-- Empty slots to simulate Albion inventory grid -->
+                    <div class="inv-slot empty"></div>
+                    <div class="inv-slot empty"></div>
+                    <div class="inv-slot empty"></div>
+                    <div class="inv-slot empty"></div>
+                </div>
             </div>
 
-            <!-- Chat Box -->
-            <div id="chat-box" class="panel">
+            <!-- Bottom Left: Chat Box -->
+            <div id="chat-container">
+                <div class="chat-tabs">
+                    <div class="tab active">General</div>
+                    <div class="tab">Combat</div>
+                </div>
                 <div id="chat-messages"></div>
-                <div id="chat-input-container">
-                    <input type="text" id="chat-input" placeholder="Press Enter to chat..." autocomplete="off">
+                <div id="chat-input-wrapper">
+                    <span class="chat-channel">[General]</span>
+                    <input type="text" id="chat-input" placeholder="Say..." autocomplete="off">
                 </div>
             </div>
 
-            <!-- Action Bar -->
-            <div id="action-bar">
-                <div class="spell-slot">
-                    <div class="spell-icon fireball-icon"></div>
-                    <span class="hotkey">Q</span>
+            <!-- Bottom Center: Action Bar -->
+            <div id="action-bar-container">
+                <div class="action-bar-bg">
+                    <div class="spell-slot circular" id="spell-q">
+                        <div class="spell-icon fireball-icon"></div>
+                        <span class="hotkey">Q</span>
+                    </div>
+                    <div class="spell-slot circular disabled">
+                        <span class="hotkey">W</span>
+                    </div>
+                    <div class="spell-slot circular disabled">
+                        <span class="hotkey">E</span>
+                    </div>
+                    <div class="spell-slot circular disabled">
+                        <span class="hotkey">R</span>
+                    </div>
+                    <div class="spell-slot circular disabled">
+                        <span class="hotkey">D</span>
+                    </div>
+                    <div class="spell-slot circular disabled">
+                        <span class="hotkey">F</span>
+                    </div>
                 </div>
-                <div class="spell-slot disabled">
-                    <span class="hotkey">W</span>
+            </div>
+
+            <!-- Bottom Right: Minimap Placeholder -->
+            <div id="minimap-container">
+                <div class="minimap-circle">
+                    <!-- map rendering goes here or CSS background -->
+                    <div class="map-content"></div>
                 </div>
-                <div class="spell-slot disabled">
-                    <span class="hotkey">E</span>
-                </div>
+                <div class="minimap-zone-name">Forest Biome</div>
+                <div class="minimap-time">12:00 UTC</div>
             </div>
 
         </div>

@@ -310,15 +310,27 @@ function draw() {
     ctx.save();
     ctx.translate(-camera.x, -camera.y);
 
-    ctx.fillStyle = '#4a752c';
+    // Draw Map floor (Isometric-ish diamond pattern texture simulation)
+    ctx.fillStyle = '#426929'; // Base grass
     ctx.fillRect(0, 0, mapData.width, mapData.height);
 
-    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    // Grid to simulate isometric tiles
+    ctx.save();
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
     ctx.lineWidth = 1;
-    for(let i=0; i<mapData.width; i+=100) {
-        ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, mapData.height); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(mapData.width, i); ctx.stroke();
+    // Transform to draw diamonds instead of squares
+    ctx.translate(mapData.width/2, 0);
+    ctx.scale(1, 0.5);
+    ctx.rotate(45 * Math.PI / 180);
+
+    // Draw a big grid covering the space
+    const gridSize = 100;
+    const bounds = mapData.width * 2;
+    for(let i = -bounds; i < bounds; i += gridSize) {
+        ctx.beginPath(); ctx.moveTo(i, -bounds); ctx.lineTo(i, bounds); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(-bounds, i); ctx.lineTo(bounds, i); ctx.stroke();
     }
+    ctx.restore();
 
     // Move Marker (only for my entity)
     let myEntity = entities.get(myEntityId);
@@ -346,30 +358,73 @@ function draw() {
 
         if (e.app.type === 'resource') {
             if (e.res && e.res.amount <= 0) return;
-            drawShadow(ctx, x, y, 20);
+            drawShadow(ctx, x, y, 25);
+
             if (e.app.subtype === 'tree') {
-                ctx.fillStyle = '#5c4033';
-                ctx.fillRect(x - 4, y - 20, 8, 20);
-                ctx.beginPath(); ctx.arc(x, y - 25, 25, 0, Math.PI * 2);
-                ctx.fillStyle = '#228B22'; ctx.fill();
-                ctx.strokeStyle = '#1a5e1a'; ctx.lineWidth = 2; ctx.stroke();
+                // More detailed tree drawing
+                ctx.fillStyle = '#4a3219'; // Trunk
+                ctx.beginPath();
+                ctx.moveTo(x-6, y); ctx.lineTo(x-4, y-30); ctx.lineTo(x+4, y-30); ctx.lineTo(x+6, y); ctx.fill();
+
+                // Leaves (multiple overlapping circles)
+                ctx.fillStyle = '#1e5e20';
+                ctx.beginPath(); ctx.arc(x-10, y-30, 15, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(x+10, y-35, 18, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(x, y-45, 20, 0, Math.PI*2); ctx.fill();
+
+                // Leaf highlights
+                ctx.fillStyle = '#2c8030';
+                ctx.beginPath(); ctx.arc(x-12, y-32, 10, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(x+8, y-37, 12, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(x-2, y-47, 14, 0, Math.PI*2); ctx.fill();
+
             } else {
-                ctx.beginPath(); ctx.moveTo(x - 15, y - 10); ctx.lineTo(x, y - 20); ctx.lineTo(x + 20, y - 5); ctx.lineTo(x + 10, y + 10); ctx.lineTo(x - 10, y + 15);
-                ctx.fillStyle = '#666'; ctx.fill();
-                ctx.beginPath(); ctx.moveTo(x - 15, y - 10); ctx.lineTo(x, y - 20); ctx.lineTo(x + 5, y - 5);
-                ctx.fillStyle = '#888'; ctx.fill();
+                // More detailed Rock
+                ctx.fillStyle = '#555';
+                ctx.beginPath();
+                ctx.moveTo(x-20, y); ctx.lineTo(x-10, y-15); ctx.lineTo(x+5, y-20);
+                ctx.lineTo(x+25, y-5); ctx.lineTo(x+15, y+10); ctx.lineTo(x-15, y+5); ctx.fill();
+
+                // Rock facets
+                ctx.fillStyle = '#777';
+                ctx.beginPath();
+                ctx.moveTo(x-10, y-15); ctx.lineTo(x+5, y-20); ctx.lineTo(x, y); ctx.fill();
+
+                ctx.fillStyle = '#444';
+                ctx.beginPath();
+                ctx.moveTo(x+5, y-20); ctx.lineTo(x+25, y-5); ctx.lineTo(x+5, y+5); ctx.fill();
             }
         } else if (e.isPlayer) {
             if (e.hp && e.hp.current <= 0) return;
             drawShadow(ctx, x, y, 15);
-            ctx.beginPath(); ctx.arc(x, y - 15, 15, 0, Math.PI * 2);
-            ctx.fillStyle = e.app.color; ctx.fill();
-            ctx.strokeStyle = '#222'; ctx.lineWidth = 2; ctx.stroke();
 
+            // Draw character as a pawn/cylinder to look more 2.5D than just a flat circle
+            ctx.fillStyle = e.app.color;
+            // Base/feet
+            ctx.beginPath(); ctx.ellipse(x, y-5, 12, 6, 0, 0, Math.PI*2); ctx.fill();
+            // Body
+            ctx.fillRect(x-12, y-20, 24, 15);
+            // Head
+            ctx.beginPath(); ctx.arc(x, y-22, 10, 0, Math.PI * 2); ctx.fill();
+
+            // Outline
+            ctx.strokeStyle = '#111'; ctx.lineWidth = 1;
+            ctx.strokeRect(x-12, y-20, 24, 15);
+            ctx.beginPath(); ctx.arc(x, y-22, 10, 0, Math.PI * 2); ctx.stroke();
+
+            // Nameplate above head
             if (e.id !== myEntityId) {
+                ctx.fillStyle = 'white';
+                ctx.font = '12px Lato';
+                ctx.textAlign = 'center';
+                ctx.strokeStyle = 'black';
+                ctx.lineWidth = 2;
+                ctx.strokeText(`Player ${e.id.substring(2,6)}`, x, y - 40);
+                ctx.fillText(`Player ${e.id.substring(2,6)}`, x, y - 40);
+
                 const bw = 30, bh = 4;
-                ctx.fillStyle = '#111'; ctx.fillRect(x - bw/2, y - 45, bw, bh);
-                ctx.fillStyle = '#d32f2f'; ctx.fillRect(x - bw/2, y - 45, bw * (e.hp.current/e.hp.max), bh);
+                ctx.fillStyle = '#111'; ctx.fillRect(x - bw/2, y - 50, bw, bh);
+                ctx.fillStyle = '#d32f2f'; ctx.fillRect(x - bw/2, y - 50, bw * (e.hp.current/e.hp.max), bh);
             }
         } else if (e.app.type === 'projectile') {
             drawShadow(ctx, x, y, 8);
