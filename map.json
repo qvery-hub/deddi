@@ -1,0 +1,22 @@
+{
+  "width": 2000,
+  "height": 2000,
+  "resources": [
+    { "id": "tree_1", "type": "tree", "x": 300, "y": 300, "amount": 50 },
+    { "id": "tree_2", "type": "tree", "x": 400, "y": 250, "amount": 50 },
+    { "id": "tree_3", "type": "tree", "x": 450, "y": 350, "amount": 50 },
+    { "id": "tree_4", "type": "tree", "x": 700, "y": 600, "amount": 50 },
+    { "id": "tree_5", "type": "tree", "x": 750, "y": 650, "amount": 50 },
+    { "id": "rock_1", "type": "rock", "x": 800, "y": 300, "amount": 50 },
+    { "id": "rock_2", "type": "rock", "x": 850, "y": 350, "amount": 50 },
+    { "id": "rock_3", "type": "rock", "x": 200, "y": 700, "amount": 50 },
+    { "id": "tree_6", "type": "tree", "x": 1200, "y": 800, "amount": 50 },
+    { "id": "tree_7", "type": "tree", "x": 1300, "y": 750, "amount": 50 },
+    { "id": "rock_4", "type": "rock", "x": 1500, "y": 1200, "amount": 50 },
+    { "id": "rock_5", "type": "rock", "x": 1600, "y": 1300, "amount": 50 },
+    { "id": "tree_8", "type": "tree", "x": 1000, "y": 1500, "amount": 50 },
+    { "id": "tree_9", "type": "tree", "x": 1100, "y": 1600, "amount": 50 },
+    { "id": "tree_10", "type": "tree", "x": 500, "y": 1800, "amount": 50 },
+    { "id": "rock_6", "type": "rock", "x": 600, "y": 1700, "amount": 50 }
+  ]
+}
